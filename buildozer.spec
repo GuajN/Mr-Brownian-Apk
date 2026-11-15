@@ -9,7 +9,7 @@ source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,atlas,json,ttf,txt,db,sqlite,csv,xlsx
 version = 51.25
 
-requirements = python3,kivy,pyjnius,pillow,openpyxl
+requirements = python3==3.12.0,kivy,pyjnius,pillow,openpyxl
 
 orientation = portrait
 fullscreen = 0

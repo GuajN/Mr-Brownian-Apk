@@ -1,0 +1,61 @@
+
+name: Build Mr Brownian APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '000_MrBrownian_V51.25.py'
+      - 'buildozer.spec'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential git zip unzip wget curl \
+            python3-pip python3-venv python3-setuptools \
+            libffi-dev libssl-dev zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo6 \
+            cmake autoconf automake libtool pkg-config \
+            libltdl-dev
+
+      - name: Install Buildozer
+        run: |
+          python3 -m pip install --user --upgrade pip
+          python3 -m pip install --user 'Cython==0.29.36' 'buildozer==1.5.0'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare application entry point
+        run: cp 000_MrBrownian_V51.25.py main.py
+
+      - name: Build debug APK
+        run: buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MrBrownian-V51.25-debug-apk
+          path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 14

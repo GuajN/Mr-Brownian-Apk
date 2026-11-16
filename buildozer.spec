@@ -11,6 +11,10 @@ version = 51.25
 
 requirements = python3==3.12.0,hostpython3==3.12.0,kivy,pyjnius,pillow,openpyxl
 
+# Pin python-for-android to the upstream fix for corrupted temporary pip environments.
+p4a.branch = develop
+p4a.commit = 0382d27de2f7315ed98e74884bafb30365decdee
+
 orientation = portrait
 fullscreen = 0
 

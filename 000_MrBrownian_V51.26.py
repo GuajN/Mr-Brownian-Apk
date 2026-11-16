@@ -2665,8 +2665,8 @@ class BrownianApp(App):
             mf=fit_font(msg,31,right-left-70,True,24); bb=d.textbbox((0,0),msg,font=mf)
             d.text(((W-(bb[2]-bb[0]))/2,y+13),msg,font=mf,fill=green if current<=0 else red); y+=mh
 
-        # Keep the thank-you footer one line below the account-status message.
-        thanks_y=y+24
+        # Keep the transaction thank-you footer one line below the account-status message.
+        thanks_y=y+24 if not payment else max(y+60,H-455)
         thanks1="Thank you so much for the patronage."
         thanks2="You are awesome."
         for i,msg in enumerate((thanks1,thanks2)):

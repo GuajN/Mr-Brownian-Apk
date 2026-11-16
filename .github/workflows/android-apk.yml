@@ -174,25 +174,25 @@ jobs:
           needle = """  snprintf(python_bundle_dir, 256,
            "%s/_python_bundle", getenv("ANDROID_UNPACK"));"""
           addition = needle + """
-  char stdlib_zip_path[512];
-  char modules_path[512];
-  snprintf(stdlib_zip_path, sizeof(stdlib_zip_path), "%s/stdlib.zip", python_bundle_dir);
-  snprintf(modules_path, sizeof(modules_path), "%s/modules", python_bundle_dir);
-  if (!dir_exists(python_bundle_dir) || access(stdlib_zip_path, R_OK) != 0 || !dir_exists(modules_path)) {
-    LOGP("Python runtime bundle is incomplete; refusing unsafe interpreter startup");
-    return 1;
-  }"""
+          char stdlib_zip_path[512];
+          char modules_path[512];
+          snprintf(stdlib_zip_path, sizeof(stdlib_zip_path), "%s/stdlib.zip", python_bundle_dir);
+          snprintf(modules_path, sizeof(modules_path), "%s/modules", python_bundle_dir);
+          if (!dir_exists(python_bundle_dir) || access(stdlib_zip_path, R_OK) != 0 || !dir_exists(modules_path)) {
+          LOGP("Python runtime bundle is incomplete; refusing unsafe interpreter startup");
+          return 1;
+          }"""
           if code.count(needle) != 1:
               raise SystemExit("Could not locate Python bundle path setup in start.c")
           code = code.replace(needle, addition, 1)
 
           old_program = '      config.program_name = L"android_python";'
           new_program = """      PyStatus program_status = PyConfig_SetString(&config, &config.program_name, L"android_python");
-      if (PyStatus_Exception(program_status)) {
+          if (PyStatus_Exception(program_status)) {
           LOGP("Could not set Python program name: %s", program_status.err_msg);
           PyConfig_Clear(&config);
           return 1;
-      }"""
+          }"""
           if old_program not in code:
               raise SystemExit("Could not locate PyConfig program_name assignment")
           code = code.replace(old_program, new_program, 1)
@@ -216,18 +216,18 @@ jobs:
           code = code.replace(old_paths, new_paths, 1)
 
           old_init = """    PyStatus status = Py_InitializeFromConfig(&config);
-    if (PyStatus_Exception(status)) {
-        LOGP("Python initialization failed:");
-        LOGP(status.err_msg);
-    }"""
+          if (PyStatus_Exception(status)) {
+          LOGP("Python initialization failed:");
+          LOGP(status.err_msg);
+          }"""
           new_init = """    PyStatus status = Py_InitializeFromConfig(&config);
-    if (PyStatus_Exception(status)) {
-        LOGP("Python initialization failed:");
-        LOGP(status.err_msg);
-        PyConfig_Clear(&config);
-        return 1;
-    }
-    PyConfig_Clear(&config);"""
+          if (PyStatus_Exception(status)) {
+          LOGP("Python initialization failed:");
+          LOGP(status.err_msg);
+          PyConfig_Clear(&config);
+          return 1;
+          }
+          PyConfig_Clear(&config);"""
           if old_init not in code:
               raise SystemExit("Could not locate Python initialization error handling")
           code = code.replace(old_init, new_init, 1)

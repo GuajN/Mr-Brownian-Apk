@@ -46,6 +46,55 @@ jobs:
           python3 -m pip install --user 'Cython==0.29.36' 'buildozer==1.5.0'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Prepare Android-compatible CPython source
+        run: |
+          curl -L --fail --retry 3 https://www.python.org/ftp/python/3.12.0/Python-3.12.0.tgz -o /tmp/Python-3.12.0.tgz
+          tar -xzf /tmp/Python-3.12.0.tgz -C "$GITHUB_WORKSPACE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path("Python-3.12.0/Modules/grpmodule.c")
+          code = source.read_text()
+          signature = re.compile(
+              r"(static PyObject\s*\*\s*grp_getgrall_impl\s*\([^)]*\)\s*"
+              r"/\*.*?\*/\s*)\{",
+              re.S,
+          )
+          match = signature.search(code)
+          if not match:
+              raise SystemExit("Could not locate CPython 3.12.0 grp_getgrall_impl; refusing unsafe patch.")
+
+          body_start = match.end()
+          depth = 1
+          index = body_start
+          while index < len(code) and depth:
+              if code[index] == "{":
+                  depth += 1
+              elif code[index] == "}":
+                  depth -= 1
+              index += 1
+          if depth:
+              raise SystemExit("Could not identify grp_getgrall_impl body; refusing unsafe patch.")
+
+          old_body = code[body_start:index - 1]
+          if "setgrent()" not in old_body or "getgrent()" not in old_body or "endgrent()" not in old_body:
+              raise SystemExit("Unexpected grp_getgrall_impl body; refusing unsafe patch.")
+
+          new_body = """
+          #ifdef ANDROID
+              /* Group enumeration APIs require Android API 26+.
+                 Keep minapi 24 support; grp.getgrall() returns an empty list. */
+              return PyList_New(0);
+          #else
+          """ + old_body + """
+          #endif
+          """
+          source.write_text(code[:body_start] + new_body + code[index - 1:])
+          print("Applied Android API 24 compatibility patch to CPython grp.getgrall.")
+          PY
+          echo "P4A_python3_DIR=$GITHUB_WORKSPACE/Python-3.12.0" >> "$GITHUB_ENV"
+
       - name: Prepare application entry point
         run: cp 000_MrBrownian_V51.25.py main.py
 

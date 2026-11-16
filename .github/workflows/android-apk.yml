@@ -49,12 +49,13 @@ jobs:
       - name: Prepare Android-compatible CPython source
         run: |
           curl -L --fail --retry 3 https://www.python.org/ftp/python/3.12.0/Python-3.12.0.tgz -o /tmp/Python-3.12.0.tgz
-          tar -xzf /tmp/Python-3.12.0.tgz -C "$GITHUB_WORKSPACE"
+          tar -xzf /tmp/Python-3.12.0.tgz -C "$RUNNER_TEMP"
           python3 - <<'PY'
           from pathlib import Path
+          import os
           import re
 
-          source = Path("Python-3.12.0/Modules/grpmodule.c")
+          source = Path(os.environ["RUNNER_TEMP"]) / "Python-3.12.0/Modules/grpmodule.c"
           code = source.read_text()
           signature = re.compile(
               r"(static PyObject\s*\*\s*grp_getgrall_impl\s*\([^)]*\)\s*"
@@ -93,7 +94,7 @@ jobs:
           source.write_text(code[:body_start] + new_body + code[index - 1:])
           print("Applied Android API 24 compatibility patch to CPython grp.getgrall.")
           PY
-          echo "P4A_python3_DIR=$GITHUB_WORKSPACE/Python-3.12.0" >> "$GITHUB_ENV"
+          echo "P4A_python3_DIR=$RUNNER_TEMP/Python-3.12.0" >> "$GITHUB_ENV"
 
       - name: Prepare application entry point
         run: cp 000_MrBrownian_V51.25.py main.py

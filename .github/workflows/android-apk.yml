@@ -1,4 +1,3 @@
-
 name: Build Mr Brownian APK
 
 on:
@@ -6,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - '000_MrBrownian_V51.25.py'
+      - '000_MrBrownian_V51.26.py'
       - 'buildozer.spec'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
@@ -45,6 +44,198 @@ jobs:
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user 'Cython==0.29.36' 'buildozer==1.5.0'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare and patch python-for-android runtime extraction
+        run: |
+          git clone https://github.com/kivy/python-for-android.git "$RUNNER_TEMP/python-for-android"
+          git -C "$RUNNER_TEMP/python-for-android" checkout 0382d27de2f7315ed98e74884bafb30365decdee
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "python-for-android"
+          util = root / "pythonforandroid/bootstraps/common/build/src/main/java/org/kivy/android/PythonUtil.java"
+          activity = root / "pythonforandroid/bootstraps/sdl2/build/src/main/java/org/kivy/android/PythonActivity.java"
+          start_c = root / "pythonforandroid/bootstraps/common/build/jni/application/src/start.c"
+
+          code = util.read_text()
+          if "import java.util.zip.ZipFile;" not in code:
+              code = code.replace("import java.util.regex.Pattern;", "import java.util.regex.Pattern;\nimport java.util.zip.ZipFile;")
+          method = r"""
+              private static boolean isPythonBundleUsable(File target) {
+                  File bundleDir = new File(target, "_python_bundle");
+                  File stdlibZip = new File(bundleDir, "stdlib.zip");
+                  File modulesDir = new File(bundleDir, "modules");
+                  if (!stdlibZip.isFile() || stdlibZip.length() < 100000 || !modulesDir.isDirectory()) {
+                      return false;
+                  }
+                  File[] modules = modulesDir.listFiles();
+                  if (modules == null || modules.length == 0) {
+                      return false;
+                  }
+                  try (ZipFile zip = new ZipFile(stdlibZip)) {
+                      return zip.getEntry("encodings/__init__.pyc") != null
+                          && zip.getEntry("encodings/utf_8.pyc") != null;
+                  } catch (Exception e) {
+                      Log.e(TAG, "Python standard library ZIP is unreadable", e);
+                      return false;
+                  }
+              }
+
+              public static boolean unpackPyBundle(
+                      Context ctx, final String resource, File target, boolean cleanup_on_version_update) {
+
+                  Log.v(TAG, "Unpacking " + resource + " " + target.getName());
+                  String dataVersion = getResourceString(ctx, "private_version");
+                  String diskVersion = "";
+                  if (dataVersion == null) {
+                      Log.e(TAG, "Python bundle version metadata is missing");
+                      return false;
+                  }
+
+                  String diskVersionFn = target.getAbsolutePath() + "/libpybundle.version";
+                  try (InputStream is = new FileInputStream(diskVersionFn)) {
+                      byte[] buf = new byte[64];
+                      int len = is.read(buf);
+                      diskVersion = len > 0 ? new String(buf, 0, len) : "";
+                  } catch (Exception e) {
+                      diskVersion = "";
+                  }
+
+                  if (dataVersion.equals(diskVersion) && isPythonBundleUsable(target)) {
+                      Log.i(TAG, "Python runtime bundle verified; using existing extraction");
+                      return true;
+                  }
+
+                  Log.w(TAG, "Python runtime bundle is missing, incomplete, or outdated; extracting again");
+                  File bundleDir = new File(target, "_python_bundle");
+                  recursiveDelete(bundleDir);
+                  target.mkdirs();
+
+                  AssetExtract ae = new AssetExtract(ctx);
+                  if (!ae.extractTar(resource + ".so", target.getAbsolutePath(), "pybundle")) {
+                      recursiveDelete(bundleDir);
+                      Log.e(TAG, "Could not extract Python runtime bundle; version stamp not updated");
+                      return false;
+                  }
+                  if (!isPythonBundleUsable(target)) {
+                      recursiveDelete(bundleDir);
+                      Log.e(TAG, "Extracted Python runtime bundle failed stdlib/codec validation");
+                      return false;
+                  }
+
+                  try (FileOutputStream os = new FileOutputStream(diskVersionFn)) {
+                      os.write(dataVersion.getBytes());
+                  } catch (Exception e) {
+                      Log.w(TAG, "Could not write Python bundle version stamp; verified bundle will be rechecked next launch", e);
+                  }
+                  return true;
+              }
+          """
+          pattern = re.compile(r"    public static void unpackPyBundle\(.*?\n    \}", re.S)
+          code, count = pattern.subn(method.strip("\n"), code)
+          if count != 1:
+              raise SystemExit(f"Expected one unpackPyBundle method, found {count}")
+          util.write_text(code)
+
+          code = activity.read_text()
+          old_call = """            PythonUtil.unpackPyBundle(
+                    mActivity,
+                    getApplicationInfo().nativeLibraryDir + "/" + "libpybundle",
+                    app_root_file,
+                    false);
+            return null;"""
+          new_call = """            boolean bundleReady = PythonUtil.unpackPyBundle(
+                    mActivity,
+                    getApplicationInfo().nativeLibraryDir + "/" + "libpybundle",
+                    app_root_file,
+                    false);
+            if (!bundleReady) {
+                return "Mr Brownian's Python runtime could not be extracted or verified. Restart the app to retry.";
+            }
+            return null;"""
+          if old_call not in code:
+              raise SystemExit("Could not locate PythonActivity Python-bundle extraction call")
+          code = code.replace(old_call, new_call, 1)
+          marker = "        protected void onPostExecute(String result) {"
+          if code.count(marker) != 1:
+              raise SystemExit("Could not locate PythonActivity onPostExecute")
+          code = code.replace(marker, marker + """
+                    if (result != null) {
+                        Log.e(TAG, result);
+                        Toast.makeText(mActivity, result, Toast.LENGTH_LONG).show();
+                        mActivity.finish();
+                        return;
+                    }""", 1)
+          activity.write_text(code)
+
+          code = start_c.read_text()
+          needle = """  snprintf(python_bundle_dir, 256,
+           "%s/_python_bundle", getenv("ANDROID_UNPACK"));"""
+          addition = needle + """
+  char stdlib_zip_path[512];
+  char modules_path[512];
+  snprintf(stdlib_zip_path, sizeof(stdlib_zip_path), "%s/stdlib.zip", python_bundle_dir);
+  snprintf(modules_path, sizeof(modules_path), "%s/modules", python_bundle_dir);
+  if (!dir_exists(python_bundle_dir) || access(stdlib_zip_path, R_OK) != 0 || !dir_exists(modules_path)) {
+    LOGP("Python runtime bundle is incomplete; refusing unsafe interpreter startup");
+    return 1;
+  }"""
+          if code.count(needle) != 1:
+              raise SystemExit("Could not locate Python bundle path setup in start.c")
+          code = code.replace(needle, addition, 1)
+
+          old_program = '      config.program_name = L"android_python";'
+          new_program = """      PyStatus program_status = PyConfig_SetString(&config, &config.program_name, L"android_python");
+      if (PyStatus_Exception(program_status)) {
+          LOGP("Could not set Python program name: %s", program_status.err_msg);
+          PyConfig_Clear(&config);
+          return 1;
+      }"""
+          if old_program not in code:
+              raise SystemExit("Could not locate PyConfig program_name assignment")
+          code = code.replace(old_program, new_program, 1)
+
+          old_paths = """            PyWideStringList_Append(&config.module_search_paths, wchar_zip_path);
+            PyWideStringList_Append(&config.module_search_paths, wchar_modules_path);"""
+          new_paths = """            PyStatus path_status = PyWideStringList_Append(&config.module_search_paths, wchar_zip_path);
+            if (PyStatus_Exception(path_status)) {
+              LOGP("Could not add Python stdlib.zip path: %s", path_status.err_msg);
+              PyConfig_Clear(&config);
+              return 1;
+            }
+            path_status = PyWideStringList_Append(&config.module_search_paths, wchar_modules_path);
+            if (PyStatus_Exception(path_status)) {
+              LOGP("Could not add Python modules path: %s", path_status.err_msg);
+              PyConfig_Clear(&config);
+              return 1;
+            }"""
+          if old_paths not in code:
+              raise SystemExit("Could not locate Python module search path setup")
+          code = code.replace(old_paths, new_paths, 1)
+
+          old_init = """    PyStatus status = Py_InitializeFromConfig(&config);
+    if (PyStatus_Exception(status)) {
+        LOGP("Python initialization failed:");
+        LOGP(status.err_msg);
+    }"""
+          new_init = """    PyStatus status = Py_InitializeFromConfig(&config);
+    if (PyStatus_Exception(status)) {
+        LOGP("Python initialization failed:");
+        LOGP(status.err_msg);
+        PyConfig_Clear(&config);
+        return 1;
+    }
+    PyConfig_Clear(&config);"""
+          if old_init not in code:
+              raise SystemExit("Could not locate Python initialization error handling")
+          code = code.replace(old_init, new_init, 1)
+          start_c.write_text(code)
+
+          print("Patched python-for-android: validate/retry stdlib extraction, stop safely on failure, and validate startup paths.")
+          PY
+          sed -i "/^p4a.commit =/a p4a.source_dir = $RUNNER_TEMP/python-for-android" buildozer.spec
 
       - name: Prepare Android-compatible CPython source
         run: |
@@ -97,7 +288,7 @@ jobs:
           echo "P4A_python3_DIR=$RUNNER_TEMP/Python-3.12.0" >> "$GITHUB_ENV"
 
       - name: Prepare application entry point
-        run: cp 000_MrBrownian_V51.25.py main.py
+        run: cp 000_MrBrownian_V51.26.py main.py
 
       - name: Build debug APK
         run: buildozer -v android debug
@@ -105,7 +296,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MrBrownian-V51.25-debug-apk
+          name: MrBrownian-V51.26-debug-apk
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 14

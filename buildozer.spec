@@ -1,4 +1,3 @@
-
 [app]
 
 title = Mr Brownian
@@ -7,7 +6,7 @@ package.domain = com.mrbrownian
 
 source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,atlas,json,ttf,txt,db,sqlite,csv,xlsx
-version = 51.25
+version = 51.26
 
 requirements = python3==3.12.0,hostpython3==3.12.0,kivy,pyjnius,pillow,openpyxl
 

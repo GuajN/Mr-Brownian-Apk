@@ -173,66 +173,73 @@ jobs:
           activity.write_text(code)
 
           code = start_c.read_text()
-          needle = """  snprintf(python_bundle_dir, 256,
-           "%s/_python_bundle", getenv("ANDROID_UNPACK"));"""
-          addition = needle + """
+          bundle_pattern = re.compile(
+              r'(?m)^[ \t]*snprintf\(python_bundle_dir, 256,\n'
+              r'[ \t]*"%s/_python_bundle", getenv\("ANDROID_UNPACK"\)\);'
+          )
+          bundle_addition = """  snprintf(python_bundle_dir, 256,
+                     "%s/_python_bundle", getenv("ANDROID_UNPACK"));
           char stdlib_zip_path[512];
           char modules_path[512];
           snprintf(stdlib_zip_path, sizeof(stdlib_zip_path), "%s/stdlib.zip", python_bundle_dir);
           snprintf(modules_path, sizeof(modules_path), "%s/modules", python_bundle_dir);
           if (!dir_exists(python_bundle_dir) || access(stdlib_zip_path, R_OK) != 0 || !dir_exists(modules_path)) {
-          LOGP("Python runtime bundle is incomplete; refusing unsafe interpreter startup");
-          return 1;
+            LOGP("Python runtime bundle is incomplete; refusing unsafe interpreter startup");
+            return 1;
           }"""
-          if code.count(needle) != 1:
+          code, count = bundle_pattern.subn(lambda _: bundle_addition, code, count=1)
+          if count != 1:
               raise SystemExit("Could not locate Python bundle path setup in start.c")
-          code = code.replace(needle, addition, 1)
 
-          old_program = '      config.program_name = L"android_python";'
+          program_pattern = re.compile(r'(?m)^[ \t]*config\.program_name = L"android_python";')
           new_program = """      PyStatus program_status = PyConfig_SetString(&config, &config.program_name, L"android_python");
           if (PyStatus_Exception(program_status)) {
-          LOGP("Could not set Python program name: %s", program_status.err_msg);
-          PyConfig_Clear(&config);
-          return 1;
+              LOGP("Could not set Python program name: %s", program_status.err_msg);
+              PyConfig_Clear(&config);
+              return 1;
           }"""
-          if old_program not in code:
+          code, count = program_pattern.subn(lambda _: new_program, code, count=1)
+          if count != 1:
               raise SystemExit("Could not locate PyConfig program_name assignment")
-          code = code.replace(old_program, new_program, 1)
 
-          old_paths = """            PyWideStringList_Append(&config.module_search_paths, wchar_zip_path);
-            PyWideStringList_Append(&config.module_search_paths, wchar_modules_path);"""
+          paths_pattern = re.compile(
+              r"(?m)^[ \t]*PyWideStringList_Append\(&config\.module_search_paths, wchar_zip_path\);\n"
+              r"[ \t]*PyWideStringList_Append\(&config\.module_search_paths, wchar_modules_path\);"
+          )
           new_paths = """            PyStatus path_status = PyWideStringList_Append(&config.module_search_paths, wchar_zip_path);
-            if (PyStatus_Exception(path_status)) {
-              LOGP("Could not add Python stdlib.zip path: %s", path_status.err_msg);
-              PyConfig_Clear(&config);
-              return 1;
-            }
-            path_status = PyWideStringList_Append(&config.module_search_paths, wchar_modules_path);
-            if (PyStatus_Exception(path_status)) {
-              LOGP("Could not add Python modules path: %s", path_status.err_msg);
-              PyConfig_Clear(&config);
-              return 1;
-            }"""
-          if old_paths not in code:
+              if (PyStatus_Exception(path_status)) {
+                  LOGP("Could not add Python stdlib.zip path: %s", path_status.err_msg);
+                  PyConfig_Clear(&config);
+                  return 1;
+              }
+              path_status = PyWideStringList_Append(&config.module_search_paths, wchar_modules_path);
+              if (PyStatus_Exception(path_status)) {
+                  LOGP("Could not add Python modules path: %s", path_status.err_msg);
+                  PyConfig_Clear(&config);
+                  return 1;
+              }"""
+          code, count = paths_pattern.subn(lambda _: new_paths, code, count=1)
+          if count != 1:
               raise SystemExit("Could not locate Python module search path setup")
-          code = code.replace(old_paths, new_paths, 1)
 
-          old_init = """    PyStatus status = Py_InitializeFromConfig(&config);
-          if (PyStatus_Exception(status)) {
-          LOGP("Python initialization failed:");
-          LOGP(status.err_msg);
-          }"""
+          init_pattern = re.compile(
+              r'(?m)^[ \t]*PyStatus status = Py_InitializeFromConfig\(&config\);\n'
+              r'[ \t]*if \(PyStatus_Exception\(status\)\) \{\n'
+              r'[ \t]*LOGP\("Python initialization failed:"\);\n'
+              r'[ \t]*LOGP\(status\.err_msg\);\n'
+              r'[ \t]*\}'
+          )
           new_init = """    PyStatus status = Py_InitializeFromConfig(&config);
-          if (PyStatus_Exception(status)) {
-          LOGP("Python initialization failed:");
-          LOGP(status.err_msg);
-          PyConfig_Clear(&config);
-          return 1;
-          }
-          PyConfig_Clear(&config);"""
-          if old_init not in code:
+              if (PyStatus_Exception(status)) {
+                  LOGP("Python initialization failed:");
+                  LOGP(status.err_msg);
+                  PyConfig_Clear(&config);
+                  return 1;
+              }
+              PyConfig_Clear(&config);"""
+          code, count = init_pattern.subn(lambda _: new_init, code, count=1)
+          if count != 1:
               raise SystemExit("Could not locate Python initialization error handling")
-          code = code.replace(old_init, new_init, 1)
           start_c.write_text(code)
 
           print("Patched python-for-android: validate/retry stdlib extraction, stop safely on failure, and validate startup paths.")

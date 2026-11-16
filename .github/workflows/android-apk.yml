@@ -140,12 +140,14 @@ jobs:
           util.write_text(code)
 
           code = activity.read_text()
-          old_call = """            PythonUtil.unpackPyBundle(
-                    mActivity,
-                    getApplicationInfo().nativeLibraryDir + "/" + "libpybundle",
-                    app_root_file,
-                    false);
-            return null;"""
+          call_pattern = re.compile(
+              r"(?m)^[ \t]*PythonUtil\.unpackPyBundle\(\n"
+              r"[ \t]*mActivity,\n"
+              r"[ \t]*getApplicationInfo\(\)\.nativeLibraryDir \+ \"/\" \+ \"libpybundle\",\n"
+              r"[ \t]*app_root_file,\n"
+              r"[ \t]*false\);\n"
+              r"[ \t]*return null;"
+          )
           new_call = """            boolean bundleReady = PythonUtil.unpackPyBundle(
                     mActivity,
                     getApplicationInfo().nativeLibraryDir + "/" + "libpybundle",
@@ -155,9 +157,9 @@ jobs:
                 return "Mr Brownian's Python runtime could not be extracted or verified. Restart the app to retry.";
             }
             return null;"""
-          if old_call not in code:
+          code, count = call_pattern.subn(lambda _: new_call, code, count=1)
+          if count != 1:
               raise SystemExit("Could not locate PythonActivity Python-bundle extraction call")
-          code = code.replace(old_call, new_call, 1)
           marker = "        protected void onPostExecute(String result) {"
           if code.count(marker) != 1:
               raise SystemExit("Could not locate PythonActivity onPostExecute")

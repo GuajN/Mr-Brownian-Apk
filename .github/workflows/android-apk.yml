@@ -174,21 +174,30 @@ jobs:
 
           code = start_c.read_text()
 
-          # SDL can enter the native bootstrap again after Android Activity
-          # recreation. CPython 3.12 aborts if AppendInittab is called once
-          # its built-in module table has been initialized.
+          # Register the built-in before any bootstrap work can initialize
+          # CPython's inittab. SDL may re-enter SDL_main during Activity
+          # recreation, so keep a process-persistent one-time guard as well.
           append_old = '''  PyImport_AppendInittab("androidembed", initandroidembed);'''
-          append_new = '''  if (!Py_IsInitialized()) {
-            if (PyImport_AppendInittab("androidembed", initandroidembed) == -1) {
-              LOGP("Could not register androidembed built-in module");
-              return 1;
-            }
-          } else {
-            LOGP("Python interpreter already initialized; skipping built-in module registration");
-          }'''
           if code.count(append_old) != 1:
               raise SystemExit("Could not locate the unique androidembed inittab registration")
-          code = code.replace(append_old, append_new, 1)
+          code = code.replace(append_old, "", 1)
+          main_old = '''int main(int argc, char *argv[]) {'''
+          main_new = '''int main(int argc, char *argv[]) {
+          #if PY_MAJOR_VERSION >= 3
+            static int androidembed_registration_attempted = 0;
+            if (!androidembed_registration_attempted) {
+              if (Py_IsInitialized()) {
+                LOGP("Python is already initialized before SDL bootstrap; androidembed registration skipped");
+              } else if (PyImport_AppendInittab("androidembed", initandroidembed) == -1) {
+                LOGP("Could not register androidembed built-in module");
+                return 1;
+              }
+              androidembed_registration_attempted = 1;
+            }
+          #endif'''
+          if code.count(main_old) != 1:
+              raise SystemExit("Could not locate unique native main() entry point")
+          code = code.replace(main_old, main_new, 1)
 
           bundle_pattern = re.compile(
               r'(?m)^[ \t]*snprintf\(python_bundle_dir, 256,\n'

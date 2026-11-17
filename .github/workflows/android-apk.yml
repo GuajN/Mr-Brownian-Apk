@@ -207,12 +207,8 @@ jobs:
               raise SystemExit("Could not locate androidembed module declaration boundary")
           code = code.replace(module_marker, module_helper, 1)
 
-          init_marker = '''              PyConfig_Clear(&config);
-
-          LOGP("Initialized python");'''
-          init_addition = '''              PyConfig_Clear(&config);
-
-          #if PY_MAJOR_VERSION >= 3
+          init_marker = '''  LOGP("Initialized python");'''
+          init_addition = '''  #if PY_MAJOR_VERSION >= 3
               if (register_androidembed_module() < 0) {
                   LOGP("Could not register androidembed in sys.modules");
                   PyErr_Print();

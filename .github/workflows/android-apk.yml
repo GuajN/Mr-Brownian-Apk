@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - '000_MrBrownian_V51.26.py'
+      - '000_MrBrownian_V51.27.py'
       - 'buildozer.spec'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
@@ -297,7 +297,7 @@ jobs:
           echo "P4A_python3_DIR=$RUNNER_TEMP/Python-3.12.0" >> "$GITHUB_ENV"
 
       - name: Prepare application entry point
-        run: cp 000_MrBrownian_V51.26.py main.py
+        run: cp 000_MrBrownian_V51.27.py main.py
 
       - name: Build debug APK
         run: buildozer -v android debug
@@ -305,7 +305,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MrBrownian-V51.26-debug-apk
+          name: MrBrownian-V51.27-debug-apk
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 14

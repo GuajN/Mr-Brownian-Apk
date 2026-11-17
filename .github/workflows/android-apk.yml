@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - '000_MrBrownian_V51.28.py'
+      - '000_MrBrownian_V51.29.py'
       - 'buildozer.spec'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
@@ -174,30 +175,57 @@ jobs:
 
           code = start_c.read_text()
 
-          # Register the built-in before any bootstrap work can initialize
-          # CPython's inittab. SDL may re-enter SDL_main during Activity
-          # recreation, so keep a process-persistent one-time guard as well.
+          # Do not call PyImport_AppendInittab: CPython 3.12 keeps its
+          # inittab state after finalization, so a later registration aborts.
           append_old = '''  PyImport_AppendInittab("androidembed", initandroidembed);'''
           if code.count(append_old) != 1:
-              raise SystemExit("Could not locate the unique androidembed inittab registration")
+              raise SystemExit("Expected exactly one upstream androidembed inittab call")
           code = code.replace(append_old, "", 1)
-          main_old = '''int main(int argc, char *argv[]) {'''
-          main_new = '''int main(int argc, char *argv[]) {
+          module_marker = '''#endif
+
+          int dir_exists(char *filename) {'''
+          module_helper = '''#endif
+
           #if PY_MAJOR_VERSION >= 3
-            static int androidembed_registration_attempted = 0;
-            if (!androidembed_registration_attempted) {
-              if (Py_IsInitialized()) {
-                LOGP("Python is already initialized before SDL bootstrap; androidembed registration skipped");
-              } else if (PyImport_AppendInittab("androidembed", initandroidembed) == -1) {
-                LOGP("Could not register androidembed built-in module");
-                return 1;
+          static int register_androidembed_module(void) {
+              PyObject *modules = PyImport_GetModuleDict();
+              if (PyDict_GetItemString(modules, "androidembed") != NULL) {
+                  return 0;
               }
-              androidembed_registration_attempted = 1;
-            }
-          #endif'''
-          if code.count(main_old) != 1:
-              raise SystemExit("Could not locate unique native main() entry point")
-          code = code.replace(main_old, main_new, 1)
+              PyObject *module = PyModule_Create(&androidembed);
+              if (module == NULL) {
+                  return -1;
+              }
+              int result = PyDict_SetItemString(modules, "androidembed", module);
+              Py_DECREF(module);
+              return result;
+          }
+          #endif
+
+          int dir_exists(char *filename) {'''
+          if code.count(module_marker) != 1:
+              raise SystemExit("Could not locate androidembed module declaration boundary")
+          code = code.replace(module_marker, module_helper, 1)
+
+          init_marker = '''              PyConfig_Clear(&config);
+
+          LOGP("Initialized python");'''
+          init_addition = '''              PyConfig_Clear(&config);
+
+          #if PY_MAJOR_VERSION >= 3
+              if (register_androidembed_module() < 0) {
+                  LOGP("Could not register androidembed in sys.modules");
+                  PyErr_Print();
+                  return 1;
+              }
+          #endif
+
+          LOGP("Initialized python");'''
+          if code.count(init_marker) != 1:
+              raise SystemExit("Could not locate post-initialization module registration point")
+          code = code.replace(init_marker, init_addition, 1)
+          if "PyImport_AppendInittab(" in code:
+              raise SystemExit("Unsafe PyImport_AppendInittab call remains in patched start.c")
 
           bundle_pattern = re.compile(
               r'(?m)^[ \t]*snprintf\(python_bundle_dir, 256,\n'
@@ -377,7 +405,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MrBrownian-V51.28-debug-apk
+          name: MrBrownian-V51.29-debug-apk
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 14

@@ -261,6 +261,7 @@ jobs:
           patch = '''
                   # Guard SDL's resume path when Android recreates the Activity
                   # before its SurfaceView exists.
+                  from pathlib import Path
                   java_root = Path(self.get_build_dir(arch.arch))
                   candidates = list(java_root.rglob("SDLActivity.java"))
                   if len(candidates) != 1:

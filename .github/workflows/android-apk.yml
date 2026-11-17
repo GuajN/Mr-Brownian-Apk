@@ -396,8 +396,10 @@ jobs:
           PY
           echo "P4A_python3_DIR=$RUNNER_TEMP/Python-3.12.0" >> "$GITHUB_ENV"
 
-      - name: Prepare application entry point
-        run: cp 000_MrBrownian_V51.28.py main.py
+      - name: Prepare V51.29 application entry point
+        run: |
+          cp 000_MrBrownian_V51.28.py 000_MrBrownian_V51.29.py
+          cp 000_MrBrownian_V51.29.py main.py
 
       - name: Build debug APK
         run: buildozer -v android debug

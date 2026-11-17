@@ -251,23 +251,16 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import os
-          import re
 
           recipe = Path(os.environ["RUNNER_TEMP"]) / "python-for-android/pythonforandroid/recipes/sdl2/__init__.py"
           code = recipe.read_text()
-
-          # Insert the Java source guard directly into build_arch(), after the
-          # recipe has extracted SDL sources and before ndk-build compiles them.
-          signature = re.compile(
-              r"(?m)^(    def build_arch\\(self, arch\\):\\n        env = self\\.get_recipe_env\\(arch\\)\\n)"
-          )
-          match = signature.search(code)
-          if not match:
-              raise SystemExit("Could not locate SDL2 build_arch method in pinned recipe")
+          needle = "    def build_arch(self, arch):\n        env = self.get_recipe_env(arch)\n"
+          if code.count(needle) != 1:
+              raise SystemExit(f"Expected one SDL build_arch header, found {code.count(needle)}")
 
           patch = '''
-                  # SDL may resume during Activity recreation before SurfaceView
-                  # exists. Guard the dereference in SDLActivity.handleNativeState.
+                  # Guard SDL's resume path when Android recreates the Activity
+                  # before its SurfaceView exists.
                   java_root = Path(self.get_build_dir(arch.arch))
                   candidates = list(java_root.rglob("SDLActivity.java"))
                   if len(candidates) != 1:
@@ -283,13 +276,13 @@ jobs:
                   elif safe not in java:
                       raise RuntimeError("SDL handleNativeState surface guard target not found")
           '''
-          code = code[:match.end()] + patch + code[match.end():]
+          code = code.replace(needle, needle + patch, 1)
           recipe.write_text(code)
 
-          # Fail early if the exact patch was not inserted.
+          # Verify the inserted build hook before continuing.
           check = recipe.read_text()
-          if "Expected exactly one SDLActivity.java" not in check or "mSurface != null && mSurface.mIsSurfaceReady" not in check:
-              raise SystemExit("SDL surface guard injection verification failed")
+          if check.count("Expected exactly one SDLActivity.java") != 1:
+              raise SystemExit("SDL surface guard hook verification failed")
           print("Inserted SDL null-surface guard into build_arch().")
           PY
 

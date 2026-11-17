@@ -252,7 +252,8 @@ jobs:
           from pathlib import Path
           import re
 
-          import os\n          recipe = Path(os.environ["RUNNER_TEMP"]) / "python-for-android/pythonforandroid/recipes/sdl2/__init__.py"
+          import os
+          recipe = Path(os.environ["RUNNER_TEMP"]) / "python-for-android/pythonforandroid/recipes/sdl2/__init__.py"
           code = recipe.read_text()
           needle = "    def build_arch(self, arch):\\n        env = self.get_recipe_env(arch)\\n\\n        with current_directory(self.get_jni_dir()):"
           replacement = '''    def build_arch(self, arch):

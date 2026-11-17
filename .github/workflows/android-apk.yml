@@ -173,6 +173,23 @@ jobs:
           activity.write_text(code)
 
           code = start_c.read_text()
+
+          # SDL can enter the native bootstrap again after Android Activity
+          # recreation. CPython 3.12 aborts if AppendInittab is called once
+          # its built-in module table has been initialized.
+          append_old = '''  PyImport_AppendInittab("androidembed", initandroidembed);'''
+          append_new = '''  if (!Py_IsInitialized()) {
+            if (PyImport_AppendInittab("androidembed", initandroidembed) == -1) {
+              LOGP("Could not register androidembed built-in module");
+              return 1;
+            }
+          } else {
+            LOGP("Python interpreter already initialized; skipping built-in module registration");
+          }'''
+          if code.count(append_old) != 1:
+              raise SystemExit("Could not locate the unique androidembed inittab registration")
+          code = code.replace(append_old, append_new, 1)
+
           bundle_pattern = re.compile(
               r'(?m)^[ \t]*snprintf\(python_bundle_dir, 256,\n'
               r'[ \t]*"%s/_python_bundle", getenv\("ANDROID_UNPACK"\)\);'
@@ -229,12 +246,17 @@ jobs:
               r'[ \t]*LOGP\(status\.err_msg\);\n'
               r'[ \t]*\}'
           )
-          new_init = """    PyStatus status = Py_InitializeFromConfig(&config);
-              if (PyStatus_Exception(status)) {
-                  LOGP("Python initialization failed:");
-                  LOGP(status.err_msg);
-                  PyConfig_Clear(&config);
-                  return 1;
+          new_init = """    if (!Py_IsInitialized()) {
+                  PyStatus status = Py_InitializeFromConfig(&config);
+                  if (PyStatus_Exception(status)) {
+                      LOGP("Python initialization failed:");
+                      LOGP(status.err_msg);
+                      PyConfig_Clear(&config);
+                      return 1;
+                  }
+                  LOGP("Python interpreter initialized successfully");
+              } else {
+                  LOGP("Reusing already initialized Python interpreter");
               }
               PyConfig_Clear(&config);"""
           code, count = init_pattern.subn(lambda _: new_init, code, count=1)

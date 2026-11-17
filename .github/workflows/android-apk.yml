@@ -250,41 +250,47 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import os
           import re
 
-          import os
           recipe = Path(os.environ["RUNNER_TEMP"]) / "python-for-android/pythonforandroid/recipes/sdl2/__init__.py"
           code = recipe.read_text()
-          needle = "    def build_arch(self, arch):\\n        env = self.get_recipe_env(arch)\\n\\n        with current_directory(self.get_jni_dir()):"
-          replacement = '''    def build_arch(self, arch):
-          env = self.get_recipe_env(arch)
 
-          # SDL 2.30.11 can resume while its SurfaceView is absent during Android
-          # activity recreation. Keep the state pending until surfaceCreated calls
-          # handleNativeState again; never dereference a null mSurface.
-          java_root = Path(self.get_build_dir(arch.arch))
-          candidates = [p for p in java_root.rglob("SDLActivity.java")
-                        if p.as_posix().endswith("/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java")]
-          if len(candidates) != 1:
-              raise RuntimeError(f"Expected one SDLActivity.java, found {len(candidates)}")
-          java_file = candidates[0]
-          java = java_file.read_text()
-          unsafe = "if (mSurface.mIsSurfaceReady && mHasFocus && mIsResumedCalled) {"
-          safe = "if (mSurface != null && mSurface.mIsSurfaceReady && mHasFocus && mIsResumedCalled) {"
-          if unsafe in java:
-              java = java.replace(unsafe, safe, 1)
-              java_file.write_text(java)
-          elif safe not in java:
-              raise RuntimeError("SDL handleNativeState surface guard target not found")
+          # Insert the Java source guard directly into build_arch(), after the
+          # recipe has extracted SDL sources and before ndk-build compiles them.
+          signature = re.compile(
+              r"(?m)^(    def build_arch\\(self, arch\\):\\n        env = self\\.get_recipe_env\\(arch\\)\\n)"
+          )
+          match = signature.search(code)
+          if not match:
+              raise SystemExit("Could not locate SDL2 build_arch method in pinned recipe")
 
-          with current_directory(self.get_jni_dir()):'''
-          if needle not in code:
-              if "mSurface != null && mSurface.mIsSurfaceReady" not in code:
-                  raise SystemExit("Could not locate SDL2 build_arch hook for safe surface patch")
-          else:
-              code = code.replace(needle, replacement, 1)
-              recipe.write_text(code)
-          print("SDL resume null-surface guard installed in SDL2 recipe.")
+          patch = '''
+                  # SDL may resume during Activity recreation before SurfaceView
+                  # exists. Guard the dereference in SDLActivity.handleNativeState.
+                  java_root = Path(self.get_build_dir(arch.arch))
+                  candidates = list(java_root.rglob("SDLActivity.java"))
+                  if len(candidates) != 1:
+                      raise RuntimeError(
+                          f"Expected exactly one SDLActivity.java under {java_root}, found {len(candidates)}"
+                      )
+                  java_file = candidates[0]
+                  java = java_file.read_text()
+                  unsafe = "if (mSurface.mIsSurfaceReady && mHasFocus && mIsResumedCalled) {"
+                  safe = "if (mSurface != null && mSurface.mIsSurfaceReady && mHasFocus && mIsResumedCalled) {"
+                  if unsafe in java:
+                      java_file.write_text(java.replace(unsafe, safe, 1))
+                  elif safe not in java:
+                      raise RuntimeError("SDL handleNativeState surface guard target not found")
+          '''
+          code = code[:match.end()] + patch + code[match.end():]
+          recipe.write_text(code)
+
+          # Fail early if the exact patch was not inserted.
+          check = recipe.read_text()
+          if "Expected exactly one SDLActivity.java" not in check or "mSurface != null && mSurface.mIsSurfaceReady" not in check:
+              raise SystemExit("SDL surface guard injection verification failed")
+          print("Inserted SDL null-surface guard into build_arch().")
           PY
 
       - name: Prepare Android-compatible CPython source

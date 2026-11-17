@@ -1,4 +1,4 @@
-# MR BROWNIAN TRADING & BUSINESS MANAGEMENT SYSTEM — V51.27 — Android runtime startup and receipt spacing corrections
+# MR BROWNIAN TRADING & BUSINESS MANAGEMENT SYSTEM — V51.27 — Payment receipt spacing and vested platform-credit stock confirmation
 import os
 import sqlite3
 import base64
@@ -50,7 +50,7 @@ except ImportError:
 
 
 # One value drives the cover badge and dashboard version on every release.
-APP_VERSION = "V51.26"
+APP_VERSION = "V51.27"
 
 
 def initialize_sqlite_index_store(db_path):
@@ -2665,8 +2665,9 @@ class BrownianApp(App):
             mf=fit_font(msg,31,right-left-70,True,24); bb=d.textbbox((0,0),msg,font=mf)
             d.text(((W-(bb[2]-bb[0]))/2,y+13),msg,font=mf,fill=green if current<=0 else red); y+=mh
 
-        # Keep the transaction thank-you footer one line below the account-status message.
-        thanks_y=y+24 if not payment else max(y+60,H-455)
+        # Shared Payment and Transaction image-receipt footer spacing.
+        # Keep the thank-you text clearly separated from the account-status panel.
+        thanks_y=max(y+72,H-455)
         thanks1="Thank you so much for the patronage."
         thanks2="You are awesome."
         for i,msg in enumerate((thanks1,thanks2)):
@@ -8468,8 +8469,48 @@ class BrownianApp(App):
             close_options()
             self.record_customer_payment(customer_name)
 
+        def open_pending_platform_credits():
+            pending = [item for item in self.data.get("transactions", [])
+                       if isinstance(item, dict)
+                       and str(item.get("platform_credit_status", "")).lower() == "pending"
+                       and isinstance(item.get("platform_credit_quantities"), dict)
+                       and item.get("platform_credit_quantities")]
+            if not pending:
+                self.popup("No pending platform credits",
+                           "There are no vested-coins platform credits awaiting confirmation.")
+                return
+            content = BoxLayout(orientation="vertical", spacing=dp(7), padding=dp(10))
+            scroll_pending = ScrollView(do_scroll_x=False, bar_width=dp(3))
+            pending_list = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(7))
+            pending_list.bind(minimum_height=pending_list.setter("height"))
+            scroll_pending.add_widget(pending_list)
+            content.add_widget(scroll_pending)
+            popup_pending = Popup(title="Pending vested-coins platform credits",
+                                  content=content, size_hint=(.94, .82),
+                                  background_color=self.PANEL)
+            for pending_tx in reversed(pending):
+                customer_name = str(pending_tx.get("customer") or "Unspecified customer")
+                when = str(pending_tx.get("date") or "")
+                vested_summary = {}
+                for redeemed in pending_tx.get("referral_reward_redemptions", []):
+                    if isinstance(redeemed, dict):
+                        platform_name = str(redeemed.get("platform") or "Platform")
+                        vested_summary[platform_name] = vested_summary.get(platform_name, 0.0) + max(0.0, self.num(redeemed.get("qty")))
+                details = ", ".join(f"{name}: {qty:,.0f}" for name, qty in vested_summary.items())
+                if not details:
+                    details = ", ".join(f"{name}: {self.num(qty):,.0f}" for name, qty in pending_tx.get("platform_credit_quantities", {}).items())
+                label = f"{customer_name}  •  {when}\\nVested coins to confirm: {details}"
+                def choose_credit(record_id=pending_tx.get("record_id")):
+                    popup_pending.dismiss()
+                    close_options()
+                    self.confirm_platform_credit(record_id)
+                pending_list.add_widget(action(label, choose_credit, "success", 62))
+            content.add_widget(action("Close", popup_pending.dismiss, "muted", 40))
+            popup_pending.open()
+
         options_body.add_widget(action("Balance Payment", open_balance_payment, "success", 40))
         options_body.add_widget(action("Refund", open_refund, "danger", 40))
+        options_body.add_widget(action("Confirm vested coins platform credit", open_pending_platform_credits, "success", 42))
         customer_balance = self._retail_label("Select a customer to see their balance.", 13, muted)
         options_body.add_widget(customer_balance)
         contact_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
@@ -9806,6 +9847,45 @@ class BrownianApp(App):
             return self.popup("Minimum not reached", "Do not mark this credit completed. Increase the purchased quantity on a new sale or resolve the shortfall first:\n" + "\n".join(shortfalls))
         rid = str(transaction_record_id)
         def finish():
+            # Deduct only vested redemption quantities from platform stock.
+            # Purchased quantities were deducted by the original sale already.
+            # Do not create or modify any customer trading-balance entry here.
+            if not tx.get("platform_credit_stock_deducted"):
+                vested_by_platform = {}
+                for item in tx.get("referral_reward_redemptions", []):
+                    if not isinstance(item, dict):
+                        continue
+                    platform_name = str(item.get("platform") or "").strip()
+                    vested_qty = max(0.0, self.num(item.get("qty")))
+                    if platform_name and vested_qty > 0:
+                        vested_by_platform[platform_name] = vested_by_platform.get(platform_name, 0.0) + vested_qty
+                shortages = []
+                for platform_name, vested_qty in vested_by_platform.items():
+                    available = self.inventory_summary(platform_name)[0]
+                    if available + 1e-7 < vested_qty:
+                        shortages.append(f"{platform_name}: need {vested_qty:,.0f}, available {available:,.0f}")
+                if shortages:
+                    return self.popup("Insufficient platform stock",
+                        "No stock or customer trading balance was changed. Resolve these stock shortfalls first:\n" + "\n".join(shortages))
+                stock_costs = {}
+                for platform_name, vested_qty in vested_by_platform.items():
+                    cost, available = self.allocate_stock_cost(platform_name, vested_qty, True)
+                    if cost is None:
+                        return self.popup("Stock deduction failed",
+                            f"{platform_name}: required {vested_qty:,.0f}, available {available:,.0f}. Credit remains pending.")
+                    stock_costs[platform_name] = cost
+                for platform_name, vested_qty in vested_by_platform.items():
+                    self.data.setdefault("coin_adjustments", []).append({
+                        "record_id": self.record_id(),
+                        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "platform": platform_name, "type": "Vested Coins Platform Credit",
+                        "qty": -vested_qty, "cost": stock_costs.get(platform_name, 0.0),
+                        "transaction_record_id": rid,
+                        "note": "Vested platform credit stock issue; customer trading balance unchanged."
+                    })
+                tx["platform_credit_stock_deducted"] = True
+                tx["platform_credit_stock_deducted_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                tx["platform_credit_stock_quantities"] = dict(vested_by_platform)
             # Ensure every redeemed platform quantity has a ledger row before
             # confirming. Older records may contain transaction detail but
             # be missing the separate redemption-ledger entry.
@@ -9836,7 +9916,9 @@ class BrownianApp(App):
                 key = next((k for k in self.data.get("customers", {}) if str(k).strip().casefold() == sponsor.casefold()), sponsor)
                 self.sync_referral_vested_carryovers(key)
             self.save()
-            self.popup("Platform credit confirmed", "The vested coins have now been deducted from the customer's available vested balance and the credit confirmation has been recorded.")
+            self.popup("Platform credit confirmed",
+                       "Vested coins were deducted from platform stock and the available vested balance. "
+                       "The customer's trading balance was not changed.")
             self.transaction_history()
         customer = str(tx.get("customer", "the customer"))
         summary = "\n".join(f"{p}: {self.num(q):,.0f} coins" for p, q in quantities.items())
@@ -9881,8 +9963,6 @@ class BrownianApp(App):
                 elif str(x.get("platform_credit_status", "")).lower() == "confirmed":
                     text += "\nPLATFORM CREDIT: CONFIRMED"
                 b=self.nav_button(text,lambda t=text:self.copy_value(t,"Transaction"),"muted");b.height=dp(170);results.add_widget(b)
-                if str(x.get("platform_credit_status", "")).lower() == "pending":
-                    results.add_widget(self.nav_button("CONFIRM PLATFORM CREDIT",lambda rid=x.get("record_id"):self.confirm_platform_credit(rid),"success"))
                 if wa:results.add_widget(self.contact_actions(wa))
                 results.add_widget(self.receipt_choice_row(x))
                 results.add_widget(self.nav_button("Edit This Transaction",lambda rid=x.get("record_id"):self.edit_transaction(rid),"primary"));results.add_widget(self.nav_button("Delete This Transaction",lambda rid=x.get("record_id"):self.delete_record("transactions",rid),"danger"))

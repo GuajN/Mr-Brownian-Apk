@@ -7,7 +7,7 @@ package.domain = com.mrbrownian
 source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,atlas,json,ttf,txt,db,sqlite,csv,xlsx
 source.exclude_patterns = 000_MrBrownian_V*.py
-version = 51.27
+version = 51.28
 
 requirements = python3==3.12.0,hostpython3==3.12.0,kivy,pyjnius,pillow,openpyxl
 

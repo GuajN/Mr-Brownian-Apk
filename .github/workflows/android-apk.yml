@@ -7,6 +7,7 @@ on:
     paths:
       - '000_MrBrownian_V51.28.py'
       - '000_MrBrownian_V51.29.py'
+      - '000_MrBrownian_V51.78 (1).py'
       - 'buildozer.spec'
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
@@ -392,10 +393,32 @@ jobs:
           PY
           echo "P4A_python3_DIR=$RUNNER_TEMP/Python-3.12.0" >> "$GITHUB_ENV"
 
-      - name: Prepare V51.29 application entry point
+      - name: Prepare V51.78 application entry point
         run: |
-          cp 000_MrBrownian_V51.28.py 000_MrBrownian_V51.29.py
-          cp 000_MrBrownian_V51.29.py main.py
+          cp "000_MrBrownian_V51.78 (1).py" main.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("main.py")
+          source = p.read_text(encoding="utf-8")
+          if not source.startswith("# MR BROWNIAN TRADING & BUSINESS MANAGEMENT SYSTEM — V51.78"):
+              raise SystemExit("Source header is not V51.78")
+          if not re.search(r'^APP_VERSION\s*=\s*["\']V51\.78["\']\s*
+
+      - name: Build debug APK
+        run: buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MrBrownian-V51.78-debug-apk
+          path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 14
+, source, re.M):
+              raise SystemExit("APP_VERSION is not V51.78")
+          print("Verified V51.78 source identifiers")
+          PY
 
       - name: Build debug APK
         run: buildozer -v android debug

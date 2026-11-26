@@ -396,14 +396,8 @@ jobs:
       - name: Prepare V51.78 application entry point
         run: |
           cp "000_MrBrownian_V51.78 (1).py" main.py
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path("main.py")
-          source = p.read_text(encoding="utf-8")
-          if not source.startswith("# MR BROWNIAN TRADING & BUSINESS MANAGEMENT SYSTEM — V51.78"):
-              raise SystemExit("Source header is not V51.78")
-          if not re.search(r'^APP_VERSION\s*=\s*["\']V51\.78["\']\s*
+          grep -q '^# MR BROWNIAN TRADING & BUSINESS MANAGEMENT SYSTEM — V51.78' main.py
+          grep -q '^APP_VERSION = "V51.78"$' main.py
 
       - name: Build debug APK
         run: buildozer -v android debug
@@ -412,21 +406,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MrBrownian-V51.78-debug-apk
-          path: bin/*.apk
-          if-no-files-found: error
-          retention-days: 14
-, source, re.M):
-              raise SystemExit("APP_VERSION is not V51.78")
-          print("Verified V51.78 source identifiers")
-          PY
-
-      - name: Build debug APK
-        run: buildozer -v android debug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: MrBrownian-V51.29-debug-apk
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 14
